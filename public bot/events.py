@@ -42,9 +42,7 @@ def setup(bot, cursor, db):
                 )
 
                 final_message = intro_msg + settings_msg
-                await channel.send(
-                    final_message,
-                    file=File("/usr/home/NSAS/.virtualenvs/sqlmcstarter/Images/OwnerRepo_github.png")
+                await channel.send(final_message)
                 )
             else:
                 await channel.send(intro_msg)
