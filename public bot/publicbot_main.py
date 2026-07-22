@@ -3,6 +3,7 @@ import sqlite3
 from discord.ext import commands
 import commands as bot_commands
 import events as bot_events
+import os
 
 # === SQLite setup === #
 db = sqlite3.connect("./bot_data.db")
@@ -33,7 +34,8 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS user_usage (
 db.commit()
 
 # === Bot Setup === #
-DISCORD_TOKEN = "token"
+
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
