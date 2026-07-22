@@ -216,8 +216,7 @@ def setup(bot, cursor, db):
             final_message = intro_msg + settings_msg
             await interaction.response.send_message(
                 final_message,
-                file=File("/usr/home/NSAS/.virtualenvs/sqlmcstarter/Images/OwnerRepo_github.png"),
                 ephemeral=True
-            )
+        )
         else:
             await interaction.response.send_message(intro_msg, ephemeral=True)
