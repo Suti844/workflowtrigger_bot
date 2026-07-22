@@ -43,7 +43,7 @@ def setup(bot, cursor, db):
 
                 final_message = intro_msg + settings_msg
                 await channel.send(final_message)
-                )
+                
             else:
                 await channel.send(intro_msg)
 
