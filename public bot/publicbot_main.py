@@ -1,107 +1,136 @@
-import discord
-import sqlite3
-from discord.ext import commands
-import commands as bot_commands
-import events as bot_events
-import os
-import os
-import sqlite3
-import discord
-from discord.ext import commands
-import commands as bot_commands
-import events as bot_events
-from flask import Flask
-from threading import Thread
+name: Run Selenium Script 
 
-# === Keep-alive web server === #
-app = Flask('')
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '**.txt'
+  workflow_dispatch:
+    inputs:
+      use_session_cache:
+        description: "Use session cache"
+        required: false
+        default: "false"
+      start_or_stop:
+        description: "start or stop"
+        required: false
+        default: "true"
+      server_name:                      
+        description: "The name of the server on Seedloaf"
+        required: true
 
-@app.route('/')
-def home():
-    return "I'm alive"
+jobs:
+  run-selenium:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
 
-def run():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('.github/workflows/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            
+      - name: Install Dependencies
+        run: pip install -r .github/workflows/requirements.txt
 
-# === SQLite setup === #
-db = sqlite3.connect("./bot_data.db")
-cursor = db.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS server_settings (
-    server_id INTEGER PRIMARY KEY,
-    owner TEXT,
-    repo TEXT,
-    workflow_file TEXT,
-    github_token TEXT,
-    notify_channel INTEGER,
-    max_uses_per_day INTEGER,
-    cooldown_time INTEGER,
-    use_session_cache INTEGER DEFAULT 0
-)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS user_usage (
-    server_id INTEGER,
-    user_id INTEGER,
-    uses INTEGER,
-    last_used REAL,
-    uses_stop INTEGER,
-    last_used_stop REAL,
-    PRIMARY KEY (server_id, user_id)
-)''')
-db.commit()
+      - name: Install jq
+        run: sudo apt-get install -y jq unzip
 
-# === Bot Setup === #
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+      - name: Cache Chrome and ChromeDriver
+        id: chrome-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/chrome
+            /usr/local/bin/chromedriver
+          key: chrome-cache-v1
 
-# Register commands and events
-bot_commands.setup(bot, cursor, db)
-bot_events.setup(bot, cursor, db)
+      - name: Check Chrome and Chrome driver
+        if: steps.chrome-cache.outputs.cache-hit != 'true'
+        id: install-chrome
+        run: |
+          # Get Latest Stable Chrome Version
+          LATEST_VERSION=$(curl -s https://github.io | jq -r '.channels.Stable.version')
+          echo "chrome_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest Chrome version: $LATEST_VERSION"
 
-# === Run Bot === #
-keep_alive()
-bot.run(DISCORD_TOKEN)
+          # Install Chrome and Chrome driver
+          CHROME_URL="https://gvt1.com{LATEST_VERSION}/linux64/chrome-linux64.zip"
+          wget "$CHROME_URL" -O chrome.zip
+          unzip -q chrome.zip
+          sudo mv chrome-linux64 /opt/chrome
+          sudo chmod +x /opt/chrome/chrome
+          sudo ln -sf /opt/chrome/chrome /usr/bin/google-chrome
 
-# === SQLite setup === #
-db = sqlite3.connect("./bot_data.db")
-cursor = db.cursor()
+          # Install ChromeDriver to /usr/local/bin
+          DRIVER_URL="https://gvt1.com{LATEST_VERSION}/linux64/chromedriver-linux64.zip"
+          wget "$DRIVER_URL" -O chromedriver.zip
+          unzip -q chromedriver.zip
+          chmod +x chromedriver-linux64/chromedriver
+          sudo mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS server_settings (
-    server_id INTEGER PRIMARY KEY,
-    owner TEXT,
-    repo TEXT,
-    workflow_file TEXT,
-    github_token TEXT,
-    notify_channel INTEGER,
-    max_uses_per_day INTEGER,
-    cooldown_time INTEGER,
-    use_session_cache INTEGER DEFAULT 0
-)''')
+      - name: Debug Secrets
+        env:
+          USERNAME: ${{ secrets.USERNAME }}
+        run: echo "USERNAME is $USERNAME"
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS user_usage (
-    server_id INTEGER,
-    user_id INTEGER,
-    uses INTEGER,
-    last_used REAL,
-    uses_stop INTEGER,
-    last_used_stop REAL,
-    PRIMARY KEY (server_id, user_id)
-)''')
+      - name: Restore Session Cache
+        if: ${{ inputs.use_session_cache == 'true' }}
+        id: restore-session
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/seedloaf-session
+          key: seedloaf-session-cache-${{ github.run_id }}
+          restore-keys: |
+            seedloaf-session-cache-
 
-db.commit()
+      - name: Run Selenium Start Script
+        if: ${{ inputs.start_or_stop == 'true' }}
+        env:
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          SERVER_NAME: ${{ inputs.server_name }}
+        run: python .github/workflows/websitebotex.py
 
-# === Bot Setup === #
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+      - name: Run Selenium Stop Script
+        if: ${{ inputs.start_or_stop == 'false' }}
+        env:
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          SERVER_NAME: ${{ inputs.server_name }}
+        run: python .github/workflows/websitebotstop.py
 
-# Register commands and events
-bot_commands.setup(bot, cursor, db)
-bot_events.setup(bot, cursor, db)
-
-# === Run Bot === #
-bot.run(DISCORD_TOKEN)
+      - name: Check for new session
+        if: ${{ inputs.use_session_cache == 'true' }}
+        id: session-check
+        run: |
+          if [ -f /tmp/seedloaf-session/.valid_session ]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Save session cache
+        if: ${{ inputs.use_session_cache == 'true' && steps.session-check.outputs.valid == 'true' }}
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: /tmp/seedloaf-session
+          key: seedloaf-session-cache-${{ github.run_number }}
