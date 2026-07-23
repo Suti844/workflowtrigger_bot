@@ -55,16 +55,15 @@ async def botsetup(interaction: discord.Interaction, notify_channel: discord.Tex
     )
     await interaction.response.send_message("✅ Bot settings updated.", ephemeral=True)
 
-@bot.tree.command(name="run_mc", description="Trigger a GitHub Actions workflow to start an MC server")
+@bot.tree.command(name="run_mc", description="Trigger a GitHub Actions workflow to start the configured MC server")
 @app_commands.describe(
-    server_password_name="Type the exact name of the server to verify access",
     action="Choose whether to start or stop the world panel target"
 )
 @app_commands.choices(action=[
     app_commands.Choice(name="Start Server", value="true"),
     app_commands.Choice(name="Stop Server", value="false")
 ])
-async def run_mc(interaction: discord.Interaction, server_password_name: str, action: app_commands.Choice[str] = None):
+async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[str] = None):
     sid = interaction.guild_id
     uid = interaction.user.id
     if sid is None:
@@ -74,15 +73,16 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
     if not settings:
         return await interaction.response.send_message("⚠️ Server settings not configured.", ephemeral=True)
 
+    # Unpack database rows
     _, owner, repo, workflow_file, token, notify_channel, max_uses, cooldown, git_branch, panel_server_name = settings
 
-    if not panel_server_name or server_password_name.strip().lower() != panel_server_name.strip().lower():
-        return await interaction.response.send_message("❌ Error: Invalid server target name specified or unauthorized access.", ephemeral=True)
+    if not panel_server_name:
+        return await interaction.response.send_message("❌ Error: No panel server name configured for this Discord server.", ephemeral=True)
 
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Thread-safe direct pipeline connection
+    # Thread-safe database context mapping
     db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
 
@@ -130,7 +130,7 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
         channel = bot.get_channel(notify_channel)
         if channel:
             try:
-                await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for an active world configuration.")
+                await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for the server.")
             except Exception:
                 pass
     else:
