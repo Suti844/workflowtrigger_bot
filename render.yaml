@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: mc-server-starter-bot
+    env: python
+    plan: free # 🚀 Forces the $0 Free Tier!
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT \"public bot.publicbot_main:flask_app\""
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false # Keeps your token hidden and secure
