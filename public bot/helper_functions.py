@@ -1,4 +1,5 @@
 import sqlite3
+import discord
 
 def get_db_connection():
     return sqlite3.connect("bot_data.db")
@@ -36,3 +37,15 @@ def update_server_settings(server_id, **kwargs):
                 
     db.commit()
     db.close()
+
+# 🔄 ADDED THIS FUNCTION BACK TO FIX YOUR IMPORT ERROR
+async def update_presence(bot):
+    """
+    Updates the bot's custom status presence.
+    """
+    try:
+        activity = discord.Activity(type=discord.ActivityType.watching, name="MC Servers")
+        await bot.change_presence(activity=activity)
+        print("🎮 Bot status presence updated successfully.")
+    except Exception as e:
+        print(f"⚠️ Failed to update presence: {e}")
