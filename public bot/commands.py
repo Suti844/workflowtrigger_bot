@@ -2,10 +2,8 @@ import discord
 import requests
 from discord import app_commands
 from datetime import datetime
-from publicbot_main import bot, db, cursor  # Ensure circular paths resolve correctly
+from publicbot_main import bot
 from helper_functions import get_server_settings, update_server_settings
-
-# === Slash Commands Route Registration === #
 
 @bot.tree.command(name="wssetup", description="Setup Github workflow and Minecraft server targets")
 @app_commands.describe(
@@ -13,7 +11,7 @@ from helper_functions import get_server_settings, update_server_settings
     repo="GitHub repository (default=mcserverstarter)", 
     workflow_file="GitHub workflow file (default=main.yml)", 
     github_token="GitHub personal access token",
-    git_branch="Target Git Branch (e.g., main, Asmp, Bskyblock)",
+    git_branch="Target Git Branch (e.g., main, Asmp)",
     panel_server_name="Exact name of the server on the Seedloaf panel (e.g., Mafia)"
 )
 async def wssetup(
@@ -40,7 +38,7 @@ async def wssetup(
     await interaction.response.send_message("✅ GitHub workflow and server panel settings updated.", ephemeral=True)
 
 @bot.tree.command(name="botsetup", description="Setup bot limits")
-@app_commands.describe(notify_channel="Notification channel", max_uses_per_day="Daily usage limit (default = 3)", cooldown_time="Cooldown in sec (default = 600)")
+@app_commands.describe(notify_channel="Notification channel", max_uses_per_day="Daily usage limit", cooldown_time="Cooldown in sec")
 async def botsetup(interaction: discord.Interaction, notify_channel: discord.TextChannel = None, max_uses_per_day: int = None, cooldown_time: int = None):
     sid = interaction.guild_id
     if sid is None:
@@ -72,18 +70,20 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
     if not settings:
         return await interaction.response.send_message("⚠️ Server settings not configured.", ephemeral=True)
 
-    # Unpack columns tracking new index lengths
     _, owner, repo, workflow_file, token, notify_channel, max_uses, cooldown, git_branch, panel_server_name = settings
 
-    # 🔒 BLIND VALIDATION LOOKUP
-    # Fails generically if typed parameter does not match your internal configuration row exactly
     if not panel_server_name or server_password_name.strip().lower() != panel_server_name.strip().lower():
         return await interaction.response.send_message("❌ Error: Invalid server target name specified or unauthorized access.", ephemeral=True)
 
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Cooldown verification check
+    # Establish localized database path context inside execution thread
+    db = sqlite3.connect("bot_data.db") if 'sqlite3' in globals() else sqlite3.connect("bot_data.db")
+    import sqlite3 as sql_pkg
+    db = sql_pkg.connect("bot_data.db")
+    cursor = db.cursor()
+
     cursor.execute("SELECT uses, last_used FROM user_usage WHERE server_id = ? AND user_id = ?", (sid, uid))
     row = cursor.fetchone()
     now = datetime.utcnow().timestamp()
@@ -91,16 +91,17 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
     if row:
         uses, last_used = row
         if uses >= max_uses:
+            db.close()
             return await interaction.response.send_message("🚫 Daily usage limit reached.", ephemeral=True)
         if now - last_used < cooldown:
             remaining = int(cooldown - (now - last_used))
+            db.close()
             return await interaction.response.send_message(f"⏳ Cooldown! Wait {remaining} sec.", ephemeral=True)
     else:
         uses, last_used = 0, 0
 
     await interaction.response.defer(ephemeral=True)
 
-    # API Payload setup targeting the unique workflow branch parameters
     url = f"https://github.com{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
     
@@ -120,14 +121,15 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
         else:
             cursor.execute("INSERT INTO user_usage (server_id, user_id, uses, last_used) VALUES (?, ?, ?, ?)", (sid, uid, 1, now))
         db.commit()
+        db.close()
 
         await interaction.followup.send(f"✅ Workflow dispatch request for **{action_label}** sent successfully!", ephemeral=True)
         
-        # Log update does not broadcast the target string publicly
         channel = bot.get_channel(notify_channel)
         if channel:
             await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for an active world configuration.")
     else:
+        db.close()
         await interaction.followup.send(f"❌ Failed: {res.text}", ephemeral=True)
 
 @bot.tree.command(name="show_settings")
@@ -155,8 +157,12 @@ async def show_settings(interaction: discord.Interaction):
 @bot.tree.command(name="users_usage")
 async def users_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
+    import sqlite3 as sql_pkg
+    db = sql_pkg.connect("bot_data.db")
+    cursor = db.cursor()
     cursor.execute("SELECT user_id, uses FROM user_usage WHERE server_id = ?", (sid,))
     rows = cursor.fetchall()
+    db.close()
     if not rows:
         return await interaction.response.send_message("No usage data.", ephemeral=True)
     result = "\n".join([f"<@{uid}>: {uses}" for uid, uses in rows])
@@ -165,6 +171,10 @@ async def users_usage(interaction: discord.Interaction):
 @bot.tree.command(name="reset_usage")
 async def reset_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
+    import sqlite3 as sql_pkg
+    db = sql_pkg.connect("bot_data.db")
+    cursor = db.cursor()
     cursor.execute("DELETE FROM user_usage WHERE server_id = ?", (sid,))
     db.commit()
+    db.close()
     await interaction.response.send_message("🔄 Usage stats reset.", ephemeral=True)
