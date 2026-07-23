@@ -2,6 +2,8 @@ import os
 import sys
 import discord
 import sqlite3
+import threading
+from flask import Flask
 from discord.ext import commands
 
 # Force Python to look inside the spaced folder path for imports
@@ -33,7 +35,14 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS user_usage (
 )''')
 db.commit()
 
-# === Bot Setup with Intents === #
+# === Production Flask Instance for Gunicorn Gateway (CRITICAL FIX) === #
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health_check():
+    return "Bot interface is online and healthy!", 200
+
+# === Bot Framework Initialization === #
 intents = discord.Intents.default()
 intents.message_content = True  # Resolves privileged intent warning logs
 
@@ -44,15 +53,23 @@ import helper_functions
 import events
 import commands as bot_commands
 
+# Background target execution loop to unblock async threads
+def run_discord_bot():
+    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+    if not DISCORD_TOKEN:
+        print("❌ CRITICAL ERROR: The 'DISCORD_TOKEN' environment variable is missing on Render!")
+    else:
+        bot.run(DISCORD_TOKEN.strip())
+
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ Connected! Logged in as {bot.user} and commands synchronized globally.")
 
+# Spawns Discord bot connection asynchronously right behind the Gunicorn deployment gateway
+threading.Thread(target=run_discord_bot, daemon=True).start()
+
+# This allows local execution fallback debugging without Gunicorn mapping
 if __name__ == "__main__":
-    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-    
-    if not DISCORD_TOKEN:
-        print("❌ CRITICAL ERROR: The 'DISCORD_TOKEN' environment variable is missing on Render!")
-    else:
-        bot.run(DISCORD_TOKEN.strip())
+    port = int(os.getenv("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
