@@ -22,7 +22,6 @@ def update_server_settings(server_id, **kwargs):
             if value is not None:  
                 cursor.execute(f"UPDATE server_settings SET {key} = ? WHERE server_id = ?", (value, server_id))
     else:
-        # Default initialization templates setup for new guilds 
         cursor.execute("""
             INSERT INTO server_settings (
                 server_id, owner, repo, workflow_file, github_token, notify_channel, 
@@ -30,7 +29,6 @@ def update_server_settings(server_id, **kwargs):
             ) VALUES (?, '', 'mcserverstarter', 'main.yml', '', 0, 3, 600, 'main', '')
         """, (server_id,))
         
-        # Populate custom overrides recursively
         for key, value in kwargs.items():
             if value is not None:
                 cursor.execute(f"UPDATE server_settings SET {key} = ? WHERE server_id = ?", (value, server_id))
@@ -38,11 +36,7 @@ def update_server_settings(server_id, **kwargs):
     db.commit()
     db.close()
 
-# 🔄 ADDED THIS FUNCTION BACK TO FIX YOUR IMPORT ERROR
 async def update_presence(bot):
-    """
-    Updates the bot's custom status presence.
-    """
     try:
         activity = discord.Activity(type=discord.ActivityType.watching, name="MC Servers")
         await bot.change_presence(activity=activity)
