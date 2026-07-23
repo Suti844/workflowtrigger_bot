@@ -73,7 +73,6 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     if not settings:
         return await interaction.response.send_message("⚠️ Server settings not configured.", ephemeral=True)
 
-    # Unpack database rows
     _, owner, repo, workflow_file, token, notify_channel, max_uses, cooldown, git_branch, panel_server_name = settings
 
     if not panel_server_name:
@@ -82,7 +81,6 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Thread-safe database context mapping
     db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
 
@@ -182,14 +180,20 @@ async def reset_usage(interaction: discord.Interaction):
     db.close()
     await interaction.response.send_message("🔄 Usage stats reset.", ephemeral=True)
 
-# === Manual Master Tree Deployment Handler === #
+# === Új parancs a beragadt duplikációk letörlésére === #
 @bot.command()
 @commands.is_owner()  
-async def sync(ctx):
-    progress_msg = await ctx.send("🔄 Contacting Discord API to sync application trees...")
+async def clearsync(ctx):
+    progress_msg = await ctx.send("🧹 Régi parancsok törlése és tiszta szinkronizáció indítása...")
     try:
+        # 1. Teljesen kiürítjük a Discord parancstárhelyét
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+        
+        # 2. Újra hozzáadjuk a friss, jelszó nélküli parancsokat
+        # Mivel a commands.py-ban vagyunk, az importok már betöltötték a parancsokat a fenti dekorátorokkal
         synced_commands = await bot.tree.sync()
-        await progress_msg.edit(content=f"✅ Success! **{len(synced_commands)}** application slash commands synchronized globally across all servers.")
-        print("🌍 [Production Sync] Global deployment completed manually by developer.")
+        
+        await progress_msg.edit(content=f"✨ Sikeres tisztítás! A duplikációk eltűntek. **{len(synced_commands)}** parancs maradt tisztán.")
     except Exception as e:
-        await progress_msg.edit(content=f"❌ Sync failed with an API exception error: `{e}`")
+        await progress_msg.edit(content=f"❌ Hiba a tisztítás során: `{e}`")
