@@ -1,9 +1,13 @@
 import discord
 import requests
+import sqlite3
 from discord import app_commands
+from discord.ext import commands
 from datetime import datetime
 from publicbot_main import bot
 from helper_functions import get_server_settings, update_server_settings
+
+# === Slash Commands Route Registration === #
 
 @bot.tree.command(name="wssetup", description="Setup Github workflow and Minecraft server targets")
 @app_commands.describe(
@@ -78,10 +82,8 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Establish localized database path context inside execution thread
-    db = sqlite3.connect("bot_data.db") if 'sqlite3' in globals() else sqlite3.connect("bot_data.db")
-    import sqlite3 as sql_pkg
-    db = sql_pkg.connect("bot_data.db")
+    # Thread-safe direct pipeline connection
+    db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
 
     cursor.execute("SELECT uses, last_used FROM user_usage WHERE server_id = ? AND user_id = ?", (sid, uid))
@@ -127,7 +129,10 @@ async def run_mc(interaction: discord.Interaction, server_password_name: str, ac
         
         channel = bot.get_channel(notify_channel)
         if channel:
-            await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for an active world configuration.")
+            try:
+                await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for an active world configuration.")
+            except Exception:
+                pass
     else:
         db.close()
         await interaction.followup.send(f"❌ Failed: {res.text}", ephemeral=True)
@@ -157,8 +162,7 @@ async def show_settings(interaction: discord.Interaction):
 @bot.tree.command(name="users_usage")
 async def users_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
-    import sqlite3 as sql_pkg
-    db = sql_pkg.connect("bot_data.db")
+    db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
     cursor.execute("SELECT user_id, uses FROM user_usage WHERE server_id = ?", (sid,))
     rows = cursor.fetchall()
@@ -171,10 +175,21 @@ async def users_usage(interaction: discord.Interaction):
 @bot.tree.command(name="reset_usage")
 async def reset_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
-    import sqlite3 as sql_pkg
-    db = sql_pkg.connect("bot_data.db")
+    db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
     cursor.execute("DELETE FROM user_usage WHERE server_id = ?", (sid,))
     db.commit()
     db.close()
     await interaction.response.send_message("🔄 Usage stats reset.", ephemeral=True)
+
+# === Manual Master Tree Deployment Handler === #
+@bot.command()
+@commands.is_owner()  
+async def sync(ctx):
+    progress_msg = await ctx.send("🔄 Contacting Discord API to sync application trees...")
+    try:
+        synced_commands = await bot.tree.sync()
+        await progress_msg.edit(content=f"✅ Success! **{len(synced_commands)}** application slash commands synchronized globally across all servers.")
+        print("🌍 [Production Sync] Global deployment completed manually by developer.")
+    except Exception as e:
+        await progress_msg.edit(content=f"❌ Sync failed with an API exception error: `{e}`")
