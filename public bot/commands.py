@@ -73,7 +73,7 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     if not settings:
         return await interaction.response.send_message("⚠️ Server settings not configured.", ephemeral=True)
 
-    # Unpack database rows
+    # Unpack database fields
     _, owner, repo, workflow_file, token, notify_channel, max_uses, cooldown, git_branch, panel_server_name = settings
 
     if not panel_server_name:
@@ -82,7 +82,7 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Thread-safe database context mapping
+    # Open localized context database mapping
     db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
 
@@ -102,42 +102,56 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     else:
         uses, last_used = 0, 0
 
+    # Defers interaction cleanly (Tells client 'Thinking...')
     await interaction.response.defer(ephemeral=True)
 
-    url = f"https://github.com{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
-    
-    data = {
-        "ref": git_branch,  
-        "inputs": {
-            "start_or_stop": start_or_stop_val,
-            "use_session_cache": "true",
-            "server_name": panel_server_name  
-        }
-    }
-
-    res = requests.post(url, json=data, headers=headers)
-    if res.status_code == 204:
-        if row:
-            cursor.execute("UPDATE user_usage SET uses = ?, last_used = ? WHERE server_id = ? AND user_id = ?", (uses+1, now, sid, uid))
-        else:
-            cursor.execute("INSERT INTO user_usage (server_id, user_id, uses, last_used) VALUES (?, ?, ?, ?)", (sid, uid, 1, now))
-        db.commit()
-        db.close()
-
-        await interaction.followup.send(f"✅ Workflow dispatch request for **{action_label}** sent successfully!", ephemeral=True)
+    try:
+        url = f"https://github.com{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
         
-        channel = bot.get_channel(notify_channel)
-        if channel:
-            try:
-                await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for the server.")
-            except Exception:
-                pass
-    else:
-        db.close()
-        # Truncate output string error length to prevent character count overflow crashes
-        error_snippet = res.text[:150].replace('\n', ' ')
-        await interaction.followup.send(f"❌ Failed (Status Code {res.status_code}): `{error_snippet}...`", ephemeral=True)
+        data = {
+            "ref": git_branch,  
+            "inputs": {
+                "start_or_stop": start_or_stop_val,
+                "use_session_cache": "true",
+                "server_name": panel_server_name  
+            }
+        }
+
+        res = requests.post(url, json=data, headers=headers)
+        
+        if res.status_code == 204:
+            if row:
+                cursor.execute("UPDATE user_usage SET uses = ?, last_used = ? WHERE server_id = ? AND user_id = ?", (uses+1, now, sid, uid))
+            else:
+                cursor.execute("INSERT INTO user_usage (server_id, user_id, uses, last_used) VALUES (?, ?, ?, ?)", (sid, uid, 1, now))
+            db.commit()
+            db.close()
+
+            # Always respond back to followup instantly to eliminate the stuck "thinking" loader UI
+            await interaction.followup.send(f"✅ Success! Workflow dispatch requested for **{action_label}**.", ephemeral=True)
+            
+            # Thread-safe async cross-channel notification broadcast
+            if notify_channel and notify_channel != 0:
+                try:
+                    channel = bot.get_channel(notify_channel) or await bot.fetch_channel(notify_channel)
+                    if channel:
+                        await channel.send(f"🚀 {interaction.user.mention} requested a **{action_label}** event for the server.")
+                except Exception as channel_err:
+                    print(f"⚠️ Notification broadcast failed: {channel_err}")
+        else:
+            db.close()
+            error_snippet = res.text[:150].replace('\n', ' ')
+            await interaction.followup.send(f"❌ Failed (Status Code {res.status_code}): `{error_snippet}...`", ephemeral=True)
+
+    except Exception as run_err:
+        # Ultimate fail-safe to close out thinking spinner UI if code encounters hardware issues
+        print(f"❌ Critical runtime exception inside run_mc loop: {run_err}")
+        try:
+            db.close()
+        except Exception:
+            pass
+        await interaction.followup.send(f"❌ Critical Internal Error occurred: `{str(run_err)[:100]}`", ephemeral=True)
 
 @bot.tree.command(name="show_settings")
 async def show_settings(interaction: discord.Interaction):
