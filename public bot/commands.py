@@ -31,15 +31,20 @@ async def wssetup(
     if sid is None:
         return await interaction.response.send_message("🚫 Use this in a server.", ephemeral=True)
     
+    clean_owner = owner.strip().replace("/", "") if owner else ""
+    clean_repo = repo.strip().replace("/", "") if repo else ""
+    clean_file = workflow_file.strip().replace("/", "") if workflow_file else "main.yml"
+
     update_server_settings(sid,
-        owner=owner,
-        repo=repo,
-        workflow_file=workflow_file,
-        github_token=github_token,
-        git_branch=git_branch,
-        panel_server_name=panel_server_name
+        owner=clean_owner,
+        repo=clean_repo,
+        workflow_file=clean_file,
+        github_token=github_token.strip() if github_token else None,
+        git_branch=git_branch.strip() if git_branch else None,
+        panel_server_name=panel_server_name.strip() if panel_server_name else None
     )
-    await interaction.response.send_message("✅ GitHub workflow and server panel settings updated.", ephemeral=True)
+    await interaction.response.send_message("✅ GitHub workflow and server panel settings updated cleanly.", ephemeral=True)
+
 
 @bot.tree.command(name="botsetup", description="Setup bot limits")
 @app_commands.describe(notify_channel="Notification channel", max_uses_per_day="Daily usage limit", cooldown_time="Cooldown in sec")
@@ -54,6 +59,7 @@ async def botsetup(interaction: discord.Interaction, notify_channel: discord.Tex
         cooldown_time=cooldown_time
     )
     await interaction.response.send_message("✅ Bot settings updated.", ephemeral=True)
+
 
 @bot.tree.command(name="run_mc", description="Trigger a GitHub Actions workflow to start the configured MC server")
 @app_commands.describe(
@@ -73,7 +79,6 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     if not settings:
         return await interaction.response.send_message("⚠️ Server settings not configured.", ephemeral=True)
 
-    # Unpack database fields
     _, owner, repo, workflow_file, token, notify_channel, max_uses, cooldown, git_branch, panel_server_name = settings
 
     if not panel_server_name:
@@ -82,7 +87,6 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     start_or_stop_val = action.value if action else "true"
     action_label = "START" if start_or_stop_val == "true" else "STOP"
 
-    # Open localized context database mapping
     db = sqlite3.connect("bot_data.db")
     cursor = db.cursor()
 
@@ -102,19 +106,22 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
     else:
         uses, last_used = 0, 0
 
-    # Defers interaction cleanly (Tells client 'Thinking...')
     await interaction.response.defer(ephemeral=True)
 
     try:
-        url = f"https://github.com{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
+        s_owner = str(owner).strip().replace("/", "")
+        s_repo = str(repo).strip().replace("/", "")
+        s_file = str(workflow_file).strip().replace("/", "")
+        
+        url = f"https://github.com{s_owner}/{s_repo}/actions/workflows/{s_file}/dispatches"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
         
         data = {
-            "ref": git_branch,  
+            "ref": str(git_branch).strip(),  
             "inputs": {
                 "start_or_stop": start_or_stop_val,
                 "use_session_cache": "true",
-                "server_name": panel_server_name  
+                "server_name": str(panel_server_name).strip()  
             }
         }
 
@@ -128,10 +135,8 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
             db.commit()
             db.close()
 
-            # Always respond back to followup instantly to eliminate the stuck "thinking" loader UI
             await interaction.followup.send(f"✅ Success! Workflow dispatch requested for **{action_label}**.", ephemeral=True)
             
-            # Thread-safe async cross-channel notification broadcast
             if notify_channel and notify_channel != 0:
                 try:
                     channel = bot.get_channel(notify_channel) or await bot.fetch_channel(notify_channel)
@@ -145,13 +150,13 @@ async def run_mc(interaction: discord.Interaction, action: app_commands.Choice[s
             await interaction.followup.send(f"❌ Failed (Status Code {res.status_code}): `{error_snippet}...`", ephemeral=True)
 
     except Exception as run_err:
-        # Ultimate fail-safe to close out thinking spinner UI if code encounters hardware issues
         print(f"❌ Critical runtime exception inside run_mc loop: {run_err}")
         try:
             db.close()
         except Exception:
             pass
         await interaction.followup.send(f"❌ Critical Internal Error occurred: `{str(run_err)[:100]}`", ephemeral=True)
+
 
 @bot.tree.command(name="show_settings")
 async def show_settings(interaction: discord.Interaction):
@@ -175,6 +180,7 @@ async def show_settings(interaction: discord.Interaction):
         ephemeral=True
     )
 
+
 @bot.tree.command(name="users_usage")
 async def users_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
@@ -188,6 +194,7 @@ async def users_usage(interaction: discord.Interaction):
     result = "\n".join([f"<@{uid}>: {uses}" for uid, uses in rows])
     await interaction.response.send_message(f"📊 Usage Stats:\n{result}", ephemeral=True)
 
+
 @bot.tree.command(name="reset_usage")
 async def reset_usage(interaction: discord.Interaction):
     sid = interaction.guild_id
@@ -198,7 +205,8 @@ async def reset_usage(interaction: discord.Interaction):
     db.close()
     await interaction.response.send_message("🔄 Usage stats reset.", ephemeral=True)
 
-# === Manual Master Tree Deployment Handler === #
+
+# === Manual Master Tree Deployment Handlers === #
 @bot.command()
 @commands.is_owner()  
 async def sync(ctx):
@@ -210,6 +218,7 @@ async def sync(ctx):
     except Exception as e:
         await progress_msg.edit(content=f"❌ Sync failed with an API exception error: `{e}`")
 
+
 @bot.command()
 @commands.is_owner()  
 async def clearsync(ctx):
@@ -220,4 +229,4 @@ async def clearsync(ctx):
         synced_commands = await bot.tree.sync()
         await progress_msg.edit(content=f"✨ Cleaned! **{len(synced_commands)}** commands remain.")
     except Exception as e:
-        await progress_msg.edit(content=f"❌ Clear failed: `{e}`")
+await progress_msg.edit(content=f"❌ Clear failed: {e}")
